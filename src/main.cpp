@@ -13,20 +13,21 @@
 // const char* mqtt_server = "public.cloud.shiftr.io"; // Failed in 2021
 //  need login and passwd (public,public) mqtt://public:public@public.cloud.shiftr.io
 // const char* mqtt_server = "broker.hivemq.com"; // anynomous Ok in 2021
-const char* mqtt_server = "test.mosquitto.org"; // anynomous Ok in 2021
-// const char *mqtt_server = "mqtt.eclipseprojects.io"; // anynomous Ok in 2021
+// const char* mqtt_server = "test.mosquitto.org"; // anynomous Ok in 2021
+const char *mqtt_server = "mqtt.eclipseprojects.io"; // anynomous Ok in 2021
 
 /*===== MQTT TOPICS ===============*/
 // #define TOPIC_TEMP "uca/M1/iot/temp"
 // #define TOPIC_LED "uca/M1/iot/led"
 #define TOPIC_PISCINE "uca/iot/piscine"
+#define TOPIC_LED "uca/iot/led"
 
 /*===== ESP is MQTT Client =======*/
 WiFiClient espClient;           // Wifi
 PubSubClient client(espClient); // MQTT client
 
 /*============= GPIO ==============*/
-const int ledPin = 19; // LED Pin
+const int ledPin = 2; // LED Pin
 
 /*============= CONST ==============*/
 #define WiFiMaxTry 10
@@ -119,7 +120,6 @@ float get_Temperature()
   return temperature;
 }
 
-
 /*============== CALLBACK ===================*/
 
 float calculateDistance(float lat1, float lon1, float lat2, float lon2)
@@ -189,7 +189,36 @@ void mqtt_pubcallback(char *topic, byte *message, unsigned int length)
     {
       color = "red";
     }
-    
+  }
+
+  if (strcmp(topic, TOPIC_LED) == 0)
+  {
+    // Message reçu sur le sujet TOPIC_LED
+    Serial.print("Message arrived on topic : ");
+    Serial.println(topic);
+    Serial.print("=> ");
+    String messageTemp;
+    for (int i = 0; i < length; i++)
+    {
+      Serial.print((char)message[i]);
+      messageTemp += (char)message[i];
+    }
+    Serial.println();
+
+    StaticJsonDocument<200> jsondoc;
+    deserializeJson(jsondoc, message);
+
+    // Récupérer l'état de la LED depuis le message JSON
+    const char *etatLed = jsondoc["led"]["etat"];
+
+    // Vérifier l'état de la LED et prendre une action correspondante
+    if (strcmp(etatLed, "on") == 0) //TODO : ajouter dans la condition que la personne soit a moins de 100m
+    {
+      // Allumer la LED
+      digitalWrite(ledPin, HIGH); // Allume la LED
+      delay(30000);               // Attend trente seconde
+      digitalWrite(ledPin, LOW);  // Éteint la LED
+    }
   }
 }
 
@@ -201,7 +230,7 @@ String Serialize_ESPstatus(float temp, int light, unsigned long uptime)
   const boolean isRUNNING = (hot || cold);
   const boolean isFIRE = (light > 1000 && temp > 30.0);
   const String LOCATION = "342";
-  const String isPresence = (light < 10000 ) ? "1" :"0";
+  const String isPresence = (light < 10000) ? "1" : "0";
 
   const String target_ip = "";
   const int target_port = 0;
@@ -227,8 +256,8 @@ String Serialize_ESPstatus(float temp, int light, unsigned long uptime)
   jsondoc["info"]["ssid"] = WiFi.SSID();
   jsondoc["info"]["ip"] = WiFi.localIP().toString();
 
-  jsondoc["piscine"]["led"] = color ;
-  jsondoc["piscine"]["presence"] = isPresence ;
+  jsondoc["piscine"]["led"] = color;
+  jsondoc["piscine"]["presence"] = isPresence;
 
   String data = "";
   serializeJson(jsondoc, data);
@@ -237,29 +266,26 @@ String Serialize_ESPstatus(float temp, int light, unsigned long uptime)
 }
 
 /*============= SUBSCRIBE =====================*/
-void mqtt_mysubscribe(char *topic)
+void mqtt_mysubscribe(const char* topic)
 {
   /*
    * Subscribe to a MQTT topic
    */
   while (!client.connected())
-  { // Loop until we're reconnected
-
+  {
     Serial.print("Attempting MQTT connection...");
-    // Attempt to connect => https://pubsubclient.knolleary.net/api
     if (client.connect("esp32", /* Client Id when connecting to the server */
                        NULL,    /* No credential */
                        NULL))
     {
       Serial.println("connected");
-      // then Subscribe topic
+      // Subscribe to the topic
       client.subscribe(topic);
     }
     else
     {
       Serial.print("failed, rc=");
       Serial.print(client.state());
-
       Serial.println(" try again in 5 seconds");
       delay(5000); // Wait 5 seconds before retrying
     }
@@ -295,7 +321,6 @@ void setup()
     Serial.println("An error occurred while mounting SPIFFS");
     return;
   }
-  
 
   // Initialize the output variables as outputs
   pinMode(ledPin, OUTPUT);
@@ -317,21 +342,18 @@ unsigned long lastPublishTime = 0; // Variable to store the time of the last pub
 void publish()
 {
   unsigned long currentTime = millis();
-  
+
   // Check if enough time has elapsed since the last publish
   if (currentTime - lastPublishTime >= 15000) // 15 seconds timeout
   {
     lastPublishTime = currentTime;
-    
+
     /*--- Publish Temperature periodically ---*/
     temperature = get_Temperature();
     String data = Serialize_ESPstatus(temperature, (int)lightLevel, uptime);
-    
-    // Serial info
-    Serial.print("Published JSON: ");
-    Serial.println(data);
+
     client.setBufferSize(3048);
-    
+
     // MQTT Publish
     client.publish(TOPIC_PISCINE, data.c_str());
   }
@@ -344,14 +366,15 @@ void loop()
   int lightValue = analogRead(LIGHT_PIN);
   lightLevel = lightValue * VOLTAGE_REFERENCE * LIGHT_FACTOR;
 
-  /*--- subscribe to TOPIC_LED if not yet ! */
+
   if (!client.connected())
   {
-    mqtt_mysubscribe((char *)(TOPIC_PISCINE));
+    mqtt_mysubscribe(TOPIC_PISCINE);
+    mqtt_mysubscribe(TOPIC_LED);
   }
 
   publish();
 
-  /* Process MQTT ... une fois par loop() ! */
+  /* Process MQTT ... once per loop() */
   client.loop();
 }
