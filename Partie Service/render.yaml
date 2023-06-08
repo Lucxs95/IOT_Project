@@ -1,0 +1,6 @@
+services:
+  - name: myService
+    env:
+      - key: NODE_ENV
+        value: production
+    startCommand: node service.js
