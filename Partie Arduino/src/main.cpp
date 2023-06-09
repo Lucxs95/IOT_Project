@@ -8,22 +8,18 @@
 #include "ESPAsyncWebServer.h"
 #include <PubSubClient.h>
 
-/*===== MQTT broker/server ========*/
-const char *mqtt_server = "mqtt.eclipseprojects.io"; // anynomous Ok in 2021
-
-/*===== MQTT TOPICS ===============*/
+const char *mqtt_server = "mqtt.eclipseprojects.io";
 #define TOPIC_PISCINE "uca/iot/piscine"
-#define TOPIC_LED "uca/iot/led"
+#define TOPIC_TELEPHONE_CONNECTED "uca/waterbnb/21904022/lucasPool"
 
+#define latitudePiscine 43.5704187
+#define longitudePiscine 6.9917197
 
-/*===== ESP is MQTT Client =======*/
-WiFiClient espClient;           // Wifi
-PubSubClient client(espClient); // MQTT client
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-/*============= GPIO ==============*/
-const int ledPin = 2; // LED Pin
+const int ledPin = 2;
 
-/*============= CONST ==============*/
 #define WiFiMaxTry 10
 #define SaveDisconnectTime 1000
 const int SH = 25;
@@ -36,29 +32,25 @@ const int LIGHT_PIN = 33;
 const float LIGHT_FACTOR = 1000.0 / 1024.0;
 const float VOLTAGE_REFERENCE = 5.0;
 String color = "blue";
-bool isPoolOpenRequested = false;
 
-/* ---- TEMP ---- */
-OneWire oneWire(23);                    // Pour utiliser une entite oneWire sur le port 23
-DallasTemperature tempSensor(&oneWire); // Cette entite est utilisee par le capteur de temperature
+OneWire oneWire(23);
+DallasTemperature tempSensor(&oneWire);
 
 float light = 0;
 
-/*-----------CONNECT WIFI-------------*/
-
 void wifi_connect_basic(String hostname, String ssid, String passwd)
 {
-  int nbtry = 0; // Nb of try to connect
+  int nbtry = 0;
 
   WiFi.mode(WIFI_OFF);
   WiFi.mode(WIFI_STA);
-  WiFi.disconnect(true); // Disconnect from an AP if it was previously connected
+  WiFi.disconnect(true);
 
   WiFi.setHostname(hostname.c_str());
 
   while (WiFi.status() != WL_CONNECTED && (nbtry < WiFiMaxTry))
   {
-    nbtry++; // Reset the nbtry counter to zero before each attempt
+    nbtry++;
     Serial.printf("\nAttempting %d to connect AP of SSID : %s", nbtry, ssid.c_str());
     WiFi.begin(ssid.c_str(), passwd.c_str());
     while (WiFi.status() != WL_CONNECTED && (millis() - startTime < SaveDisconnectTime))
@@ -102,7 +94,6 @@ void wifi_status()
   Serial.print(s);
 }
 
-/*================================*/
 void set_LED(int v)
 {
   digitalWrite(ledPin, v);
@@ -110,27 +101,23 @@ void set_LED(int v)
 
 float get_Temperature()
 {
-  tempSensor.requestTemperatures();                  // Demande de mise à jour de la valeur de température
-  float temperature = tempSensor.getTempCByIndex(0); // Récupération de la valeur de température
+  tempSensor.requestTemperatures();
+  float temperature = tempSensor.getTempCByIndex(0);
   return temperature;
 }
 
 float calculateDistance(float lat1, float lon1, float lat2, float lon2)
 {
-  // Convertit les coordonnées en radians
   float lat1Rad = radians(lat1);
   float lon1Rad = radians(lon1);
   float lat2Rad = radians(lat2);
   float lon2Rad = radians(lon2);
 
-  // Rayon moyen de la Terre en kilomètres
   float radius = 6371.0;
 
-  // Calcul des différences de latitude et de longitude
   float deltaLat = lat2Rad - lat1Rad;
   float deltaLon = lon2Rad - lon1Rad;
 
-  // Calcul de la distance orthodromique
   float a = sin(deltaLat / 2) * sin(deltaLat / 2) +
             cos(lat1Rad) * cos(lat2Rad) *
                 sin(deltaLon / 2) * sin(deltaLon / 2);
@@ -140,60 +127,20 @@ float calculateDistance(float lat1, float lon1, float lat2, float lon2)
   return distance;
 }
 
-/*================================*/
-
 bool isInsidePerimeter(float clientLatitude, float clientLongitude, float poolLatitude, float poolLongitude, float radius)
 {
   float distance = calculateDistance(clientLatitude, clientLongitude, poolLatitude, poolLongitude);
   return distance <= radius;
 }
 
-void updatePoolStatus()
-{
-  float clientLatitude = 43.5704187; // Latitude du client
-  float clientLongitude = 6.9917197; // Longitude du client
-  float poolLatitude = 43.5704187;   // Latitude de la piscine
-  float poolLongitude = 6.9917197;   // Longitude de la piscine
-  float perimeterRadius = 0.1;       // Rayon du périmètre en kilomètres (100 mètres)
-
-  bool isOpen = isInsidePerimeter(clientLatitude, clientLongitude, poolLatitude, poolLongitude, perimeterRadius);
-
-  if (isPoolOpenRequested && isOpen)
-  {
-    if (color != "yellow")
-    {
-      color = "yellow";
-      Serial.println("Pool is open");
-      // Mettre à jour l'icône sur le dashboard du client avec la couleur jaune
-      // Code pour mettre à jour l'icône du dashboard avec la couleur jaune
-    }
-  }
-  else
-  {
-    if (color != "blue")
-    {
-      color = "blue";
-      Serial.println("Pool is closed");
-      // Mettre à jour l'icône sur le dashboard du client avec la couleur bleue
-      // Code pour mettre à jour l'icône du dashboard avec la couleur bleue
-    }
-  }
-}
-/*============== CALLBACK ===================*/
-
 void mqtt_pubcallback(char *topic, byte *message, unsigned int length)
 {
-  /*
-   * Callback if a message is published on this topic.
-   */
-
   if (strcmp(topic, TOPIC_PISCINE) == 0)
   {
     Serial.print("Message arrived on topic : ");
     Serial.println(topic);
     Serial.print("=> ");
 
-    // Byte list to String and print to Serial
     String messageTemp;
     for (int i = 0; i < length; i++)
     {
@@ -209,9 +156,8 @@ void mqtt_pubcallback(char *topic, byte *message, unsigned int length)
     float longitudeRecupere = jsondoc["info"]["loc"]["lon"].as<float>();
     String usernameRecupere = jsondoc["info"]["ident"].as<String>();
 
-    // Check if the user is within the specified radius
-    float currentLatitude = 43.5704187; // Your current latitude
-    float currentLongitude = 6.9917197; // Your current longitude
+    float currentLatitude = latitudePiscine;
+    float currentLongitude = longitudePiscine;
 
     float distanceBetween = calculateDistance(currentLatitude, currentLongitude, latitudeRecupere, longitudeRecupere);
 
@@ -225,9 +171,8 @@ void mqtt_pubcallback(char *topic, byte *message, unsigned int length)
     }
   }
 
-  if (strcmp(topic, TOPIC_LED) == 0)
+  if (strcmp(topic, TOPIC_TELEPHONE_CONNECTED) == 0)
   {
-    // Message reçu sur le sujet TOPIC_LED
     Serial.print("Message arrived on topic : ");
     Serial.println(topic);
     Serial.print("=> ");
@@ -239,32 +184,35 @@ void mqtt_pubcallback(char *topic, byte *message, unsigned int length)
     }
     Serial.println();
 
-    StaticJsonDocument<200> jsondoc;
+    DynamicJsonDocument jsondoc(4096);
     deserializeJson(jsondoc, message);
 
-    // Récupérer l'état de la LED depuis le message JSON
-    const char *etatLed = jsondoc["led"]["etat"];
+    const char *etatPorte = jsondoc["piscine"]["porte"]["etat"].as<const char *>();
+    const char *userIdu = jsondoc["piscine"]["user"]["idu"].as<const char *>();
+    const char *userIswp = jsondoc["piscine"]["user"]["idswp"].as<const char *>();
+    float userIswpLon = jsondoc["piscine"]["user"]["lon"].as<float>();
+    float userIswpLat = jsondoc["piscine"]["user"]["lat"].as<float>();
+    const char *nomPiscine = jsondoc["piscine"]["nomPiscine"].as<const char *>();
 
-    // Vérifier l'état de la LED et prendre une action correspondante
-    if (strcmp(etatLed, "on") == 0)
-    {
-      // Allumer la LED
-      isPoolOpenRequested = true;
-      digitalWrite(ledPin, HIGH); // Allume la LED
-      delay(30000);               // Attend trente seconde
-      digitalWrite(ledPin, LOW);  // Éteint la LED
-    }
-    else if (strcmp(etatLed, "off") == 0)
-    {
-      // Éteindre la LED
-      isPoolOpenRequested = false;
+    const float distanceBetween = calculateDistance(userIswpLat, userIswpLon, latitudePiscine, longitudePiscine);
 
+    const boolean piscineOpenAndUserOutsidePerimeter = distanceBetween > 100;
+
+    if (strcmp(etatPorte, "open") == 0)
+    {
+      digitalWrite(ledPin, HIGH);
+      delay(30000);
       digitalWrite(ledPin, LOW);
+      color = "yellow";
+    }
+    else if (strcmp(nomPiscine, "null") == 0 && piscineOpenAndUserOutsidePerimeter)
+    {
+      digitalWrite(ledPin, LOW);
+      color = "blue";
     }
   }
 }
 
-/*----------------Serialize_ESPstatus-------------------------*/
 String Serialize_ESPstatus(float temp, int light, unsigned long uptime)
 {
   const boolean hot = (temp > SH);
@@ -291,8 +239,8 @@ String Serialize_ESPstatus(float temp, int light, unsigned long uptime)
 
   jsondoc["info"]["ident"] = "lucasPool";
   jsondoc["info"]["user"] = "Lucas";
-  jsondoc["info"]["loc"]["lat"] = "43.5704187";
-  jsondoc["info"]["loc"]["lon"] = "6.9917197";
+  jsondoc["info"]["loc"]["lat"] = latitudePiscine;
+  jsondoc["info"]["loc"]["lon"] = longitudePiscine;
   jsondoc["info"]["description"] = "test";
   jsondoc["info"]["uptime"] = uptime;
   jsondoc["info"]["ssid"] = WiFi.SSID();
@@ -307,21 +255,14 @@ String Serialize_ESPstatus(float temp, int light, unsigned long uptime)
   return data;
 }
 
-/*============= SUBSCRIBE =====================*/
 void mqtt_mysubscribe(const char *topic)
 {
-  /*
-   * Subscribe to a MQTT topic
-   */
   while (!client.connected())
   {
     Serial.print("Attempting MQTT connection...");
-    if (client.connect("esp32", /* Client Id when connecting to the server */
-                       NULL,    /* No credential */
-                       NULL))
+    if (client.connect("esp32", NULL, NULL))
     {
       Serial.println("connected");
-      // Subscribe to the topic
       client.subscribe(topic);
     }
     else
@@ -329,16 +270,16 @@ void mqtt_mysubscribe(const char *topic)
       Serial.print("failed, rc=");
       Serial.print(client.state());
       Serial.println(" try again in 5 seconds");
-      delay(5000); // Wait 5 seconds before retrying
+      delay(5000);
     }
   }
 }
-/*===== Arduino IDE paradigm : setup+loop =====*/
+
 void setup()
 {
   Serial.begin(9600);
   while (!Serial)
-    ; // wait for a serial connection. Needed for native USB port only
+    ;
 
   tempSensor.begin();
 
@@ -346,7 +287,7 @@ void setup()
   String password = String("lucaslucille2906");
   String hostname = String("ESP32-Lucas");
 
-  wifi_connect_basic(hostname, ssid, password); // Connexion Wifi
+  wifi_connect_basic(hostname, ssid, password);
   wifi_status();
 
   while (WiFi.status() != WL_CONNECTED)
@@ -364,51 +305,39 @@ void setup()
     return;
   }
 
-  // Initialize the output variables as outputs
   pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, LOW); // Set outputs to LOW
+  digitalWrite(ledPin, LOW);
 
-  // Init temperature sensor
   tempSensor.begin();
 
-  // set server of our client
   client.setServer(mqtt_server, 1883);
-  // set callback when publishes arrive for the subscribed topic
-
   client.setCallback(mqtt_pubcallback);
 
-  // Subscribe to MQTT topics
-  mqtt_mysubscribe(TOPIC_LED);
+  mqtt_mysubscribe(TOPIC_TELEPHONE_CONNECTED);
   mqtt_mysubscribe(TOPIC_PISCINE);
 }
 
-/*------------------ PUBLISH ----------------------*/
-unsigned long lastPublishTime = 0; // Variable to store the time of the last publish
+unsigned long lastPublishTime = 0;
 
 void publish()
 {
   unsigned long currentTime = millis();
 
-  // Check if enough time has elapsed since the last publish
-  if (currentTime - lastPublishTime >= 5000) // 5 seconds timeout
+  if (currentTime - lastPublishTime >= 5000)
   {
     lastPublishTime = currentTime;
 
-    /*--- Publish Temperature periodically ---*/
     temperature = get_Temperature();
     String data = Serialize_ESPstatus(temperature, (int)lightLevel, uptime);
 
-    // Serial info
     Serial.print("Published JSON: ");
     Serial.println(data);
     client.setBufferSize(3048);
 
-    // MQTT Publish
     client.publish(TOPIC_PISCINE, data.c_str());
   }
 }
 
-/*================= LOOP ======================*/
 void loop()
 {
   uptime = (millis() - startTime) / 1000;
@@ -417,15 +346,11 @@ void loop()
 
   if (!client.connected())
   {
-    mqtt_mysubscribe(TOPIC_LED);
+    mqtt_mysubscribe(TOPIC_TELEPHONE_CONNECTED);
     mqtt_mysubscribe(TOPIC_PISCINE);
   }
-  if (isPoolOpenRequested)
-  {
-    updatePoolStatus();
-  }
+
   publish();
 
-  /* Process MQTT ... once per loop() */
   client.loop();
 }
